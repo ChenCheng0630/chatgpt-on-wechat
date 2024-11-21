@@ -89,7 +89,7 @@ MODEL_LIST = [
               MOONSHOT, MiniMax,
               GEMINI, GEMINI_PRO, GEMINI_15_flash, GEMINI_15_PRO,
               CLAUDE_3_OPUS, CLAUDE_3_OPUS_0229, CLAUDE_35_SONNET, CLAUDE_35_SONNET_1022, CLAUDE_35_SONNET_0620, CLAUDE_3_SONNET, CLAUDE_3_HAIKU, "claude", "claude-3-haiku", "claude-3-sonnet", "claude-3-opus", "claude-3.5-sonnet",
-              "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k",
+              "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-auto",
               QWEN, QWEN_TURBO, QWEN_PLUS, QWEN_MAX,
               LINKAI_35, LINKAI_4_TURBO, LINKAI_4o
             ]

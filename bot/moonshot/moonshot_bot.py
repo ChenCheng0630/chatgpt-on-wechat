@@ -1,6 +1,7 @@
 # encoding:utf-8
 
 import time
+import json
 
 import openai
 import openai.error
@@ -26,6 +27,12 @@ class MoonshotBot(Bot):
             "model": model,  # 对话模型的名称
             "temperature": conf().get("temperature", 0.3),  # 如果设置，值域须为 [0, 1] 我们推荐 0.3，以达到较合适的效果。
             "top_p": conf().get("top_p", 1.0),  # 使用默认值
+            "tools": [
+                {"type": "builtin_function",
+                "function": {
+                    "name": "$web_search"
+                }}
+            ]
         }
         self.api_key = conf().get("moonshot_api_key")
         self.base_url = conf().get("moonshot_base_url", "https://api.moonshot.cn/v1/chat/completions")
@@ -97,45 +104,77 @@ class MoonshotBot(Bot):
             }
             body = args
             body["messages"] = session.messages
-            # logger.debug("[MOONSHOT_AI] response={}".format(response))
-            # logger.info("[MOONSHOT_AI] reply={}, total_tokens={}".format(response.choices[0]['message']['content'], response["usage"]["total_tokens"]))
-            res = requests.post(
-                self.base_url,
-                headers=headers,
-                json=body
-            )
-            if res.status_code == 200:
-                response = res.json()
-                return {
-                    "total_tokens": response["usage"]["total_tokens"],
-                    "completion_tokens": response["usage"]["completion_tokens"],
-                    "content": response["choices"][0]["message"]["content"]
-                }
-            else:
-                response = res.json()
-                error = response.get("error")
-                logger.error(f"[MOONSHOT_AI] chat failed, status_code={res.status_code}, "
-                             f"msg={error.get('message')}, type={error.get('type')}")
 
-                result = {"completion_tokens": 0, "content": "提问太快啦，请休息一下再问我吧"}
-                need_retry = False
-                if res.status_code >= 500:
-                    # server error, need retry
-                    logger.warn(f"[MOONSHOT_AI] do retry, times={retry_count}")
-                    need_retry = retry_count < 2
-                elif res.status_code == 401:
-                    result["content"] = "授权失败，请检查API Key是否正确"
-                elif res.status_code == 429:
-                    result["content"] = "请求过于频繁，请稍后再试"
-                    need_retry = retry_count < 2
+            # Process the response and handle tool calls
+            while True:
+                res = requests.post(
+                    self.base_url,
+                    headers=headers,
+                    json=body
+                )
+
+                if res.status_code == 200:
+                    response = res.json()
+                    message = response["choices"][0]["message"]
+
+                    # Check if the model wants to use tools
+                    if "tool_calls" in message:
+                        # Add the assistant's message to the conversation
+                        session.messages.append(message)
+
+                        # Process each tool call
+                        for tool_call in message["tool_calls"]:
+                            tool_name = tool_call["function"]["name"]
+                            tool_args = json.loads(tool_call["function"]["arguments"])
+
+                            if tool_name == "$web_search":
+                                # For web search, we just pass through the arguments
+                                tool_result = tool_args
+                            else:
+                                tool_result = f"Error: unknown tool '{tool_name}'"
+
+                            # Add the tool response to the conversation
+                            session.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call["id"],
+                                "name": tool_name,
+                                "content": json.dumps(tool_result)
+                            })
+
+                        # Continue the conversation with the tool results
+                        continue
+
+                    # No more tool calls, return the final response
+                    return {
+                        "total_tokens": response["usage"]["total_tokens"],
+                        "completion_tokens": response["usage"]["completion_tokens"],
+                        "content": message["content"]
+                    }
                 else:
+                    response = res.json()
+                    error = response.get("error")
+                    logger.error(f"[MOONSHOT_AI] chat failed, status_code={res.status_code}, "
+                                 f"msg={error.get('message')}, type={error.get('type')}")
+
+                    result = {"completion_tokens": 0, "content": "提问太快啦，请休息一下再问我吧"}
                     need_retry = False
+                    if res.status_code >= 500:
+                        # server error, need retry
+                        logger.warn(f"[MOONSHOT_AI] do retry, times={retry_count}")
+                        need_retry = retry_count < 2
+                    elif res.status_code == 401:
+                        result["content"] = "授权失败，请检查API Key是否正确"
+                    elif res.status_code == 429:
+                        result["content"] = "请求过于频繁，请稍后再试"
+                        need_retry = retry_count < 2
+                    else:
+                        need_retry = False
 
-                if need_retry:
-                    time.sleep(3)
-                    return self.reply_text(session, args, retry_count + 1)
-                else:
-                    return result
+                    if need_retry:
+                        time.sleep(3)
+                        return self.reply_text(session, args, retry_count + 1)
+                    else:
+                        return result
         except Exception as e:
             logger.exception(e)
             need_retry = retry_count < 2
